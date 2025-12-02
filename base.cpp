@@ -3,7 +3,7 @@
 //|           Version B - Safe Trend Scalper + Pending Orders        |
 //+------------------------------------------------------------------+
 #property copyright "Smart Scalping Bot v3 - Safe Trend Scalper"
-#property version   "3.10"
+#property version   "3.21" // Updated for Dynamic Daily Loss Logic
 #property strict
 
 //==================== ENUMS =========================================//
@@ -26,13 +26,14 @@ input double   PendingDistanceATR = 3.0;      // Distance in ATR for Pending Ord
 input int      PendingExpirationMin = 60;     // Pending Order Expiration (Minutes)
 input bool     DeletePendingOnOpposite = true;// Delete Pending Orders on opposite signal
 
-// --- NEW DYNAMIC LOT SETTINGS ---
+// --- NEW DYNAMIC LOT SETTINGS (UPDATED) ---
 input group "=== Money Management ===";
 input bool     UseDynamicLots = true;         // Enable Dynamic Lot Sizing
-input double   RiskPercent = 3.0;             // Base Risk % per trade setup
-input double   MaxLotSize = 5.0;              // Maximum allowed lot size safety cap
+input double   RiskPercent = 2.0;             // Base Risk % of Balance per setup
+input double   MinLotSize = 0.1;              // Minimum Lot Size (Hard Limit)
+input double   MaxLotSize = 10.0;             // Maximum Lot Size (Hard Limit)
 // Fallback if Dynamic Lots = false
-input double   FixedBaseLot = 0.01;
+input double   FixedBaseLot = 0.1;
 
 input group "=== Indicator Settings ===";
 input int      EMA_Fast = 5;                  // Fast EMA Period (M1)
@@ -68,11 +69,15 @@ input bool     SendNotifications = false;     // Send push notifications
 
 //==================== SAFETY / ATR / HTF ============================//
 input group "=== Risk / Safety Limits ===";
-input double   DailyLossLimit = 500.0;        // Stop trading for the day if loss reaches this
+input bool     EnableDailyLossStop = true;    // Enable daily loss stop
+// New Logic Inputs
+input double   BalanceThreshold = 5000.0;     // Balance logic threshold
+input double   FixedLossBelowThreshold = 1000.0; // Fixed Limit if Balance < Threshold
+input double   PctLossAboveThreshold = 20.0;  // Percent Limit if Balance >= Threshold
+
 input double   MaxEquityDrawdown = 0.10;      // Stop trading if equity drawdown > 10%
 input int      MaxConsecutiveLosses = 100;    // Stop trading after N consecutive losing trades
 input bool     EnableEquityStop = true;       // Enable equity stop
-input bool     EnableDailyLossStop = false;   // Enable daily loss stop
 
 input group "=== Volatility & TF Filters ===";
 input int      ATR_Period = 14;               // ATR period for stop sizing
@@ -179,10 +184,9 @@ int OnInit() {
    SyncPositions();
 
    Print("========================================");
-   Print("Smart Scalping Bot v3.1 - Pending Orders Enabled");
+   Print("Smart Scalping Bot v3.21 - Dynamic Daily Limit");
    Print("Mode: ", EnumToString(ExecutionMode));
-   Print("Max Positions: ", MaxPositions);
-   Print("Max Total (Inc Pending): ", MaxTotalPositions);
+   Print("Lot Limits: ", MinLotSize, " - ", MaxLotSize);
    Print("========================================");
 
    return(INIT_SUCCEEDED);
@@ -399,12 +403,12 @@ void OpenSmartPositions(string signal, string strength, int score) {
    double slDist = atrM1 * ATR_SL_Mult;
    double tpDist = atrM1 * ATR_TP_Mult;
 
-   // Determine Lot Size
-   double lotToTrade = UseDynamicLots ? GetDynamicLot(slDist, RiskPercent, strength) : FixedBaseLot;
-   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   lotToTrade = MathFloor(lotToTrade / lotStep) * lotStep;
-   if(lotToTrade < minLot) lotToTrade = minLot;
+   // Determine Lot Size (Passed Score and Strength)
+   double lotToTrade = UseDynamicLots ? GetDynamicLot(slDist, RiskPercent, score) : FixedBaseLot;
+
+   // Hard Cap Check just in case
+   if(lotToTrade > MaxLotSize) lotToTrade = MaxLotSize;
+   if(lotToTrade < MinLotSize) lotToTrade = MinLotSize;
 
    // Execution Loop
    int positionsToOpen = (ExecutionMode == MODE_HYBRID_LIMIT) ? 1 : MaxPositions;
@@ -669,10 +673,28 @@ void UpdateDisplay() {
       if(PositionSelectByTicket(positions[i].ticket)) currentProfit += PositionGetDouble(POSITION_PROFIT);
    }
 
+   // --- Calculate Current Daily Limit for Display ---
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double currentLimit = 0;
+   if(balance < BalanceThreshold) currentLimit = FixedLossBelowThreshold;
+   else currentLimit = balance * (PctLossAboveThreshold/100.0);
+
+   // --- Calculate Daily Loss ---
+   double dailyProfit = 0;
+   datetime start = (datetime)(TimeCurrent() - (TimeCurrent() % 86400));
+   if(HistorySelect(start, TimeCurrent())) {
+      for(int i=0; i<HistoryDealsTotal(); i++) {
+         ulong ticket = HistoryDealGetTicket(i);
+         dailyProfit += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+         dailyProfit += HistoryDealGetDouble(ticket, DEAL_SWAP);
+         dailyProfit += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+      }
+   }
+
    string info = StringFormat(
-      "SMART SCALPING BOT v3.1 (Pending)\nMode: %s\nTime: %02d:%02d UTC+7\nPrice: %.5f\nPositions+Pending: %d / %d\nLast Signal: %s\nCurrent P/L: $%.2f\nTotal P/L: $%.2f",
+      "SMART SCALPING BOT v3.21 (Dynamic Limits)\nMode: %s\nTime: %02d:%02d UTC+7\nPrice: %.5f\nPositions: %d / %d\nLast Signal: %s\nCurrent Open P/L: $%.2f\nTotal History P/L: $%.2f\n\nDaily P/L: $%.2f\nDaily Limit: -$%.2f",
       EnumToString(ExecutionMode), dt.hour, dt.min, price, openPos, MaxTotalPositions,
-      lastSignal, currentProfit, stats.totalProfit
+      lastSignal, currentProfit, stats.totalProfit, dailyProfit, currentLimit
    );
    Comment(info);
 }
@@ -703,24 +725,42 @@ int GetHigherTFTrend() {
    if(up > down) return 1; if(down > up) return -1; return 0;
 }
 
-double GetDynamicLot(double slDistancePoints, double riskPct, string strength) {
+// UPDATED DYNAMIC LOT FUNCTION
+double GetDynamicLot(double slDistancePoints, double riskPct, int score) {
    if(!UseDynamicLots) return FixedBaseLot;
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double riskMoney = (equity * (riskPct / 100.0)) / (double)MaxPositions;
 
-   // Strength Multiplier
+   // 1. Calculate base risk from BALANCE (not Equity, as requested)
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double riskMoney = (balance * (riskPct / 100.0)) / (double)MaxPositions;
+
+   // 2. Score Multiplier
    double mult = 1.0;
-   if(strength=="MEDIUM") mult=1.5; else if(strength=="STRONG") mult=2.0; else if(strength=="VERY_STRONG") mult=3.0;
+   if(score >= 9) mult = 2.0;       // Very Strong Signal (Score 9+)
+   else if(score >= 7) mult = 1.5;  // Strong Signal (Score 7-8)
+   else mult = 1.0;                 // Medium Signal (Score 5-6)
+
    riskMoney *= mult;
 
+   // 3. Calculate Lot based on Stop Loss distance
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+
    if(tickValue <= 0 || tickSize <= 0) return FixedBaseLot;
 
    double lossPerLot = (slDistancePoints / tickSize) * tickValue;
    if(lossPerLot <= 0) return FixedBaseLot;
 
-   return riskMoney / lossPerLot;
+   double rawLot = riskMoney / lossPerLot;
+
+   // 4. Broker Step Normalization
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   rawLot = MathFloor(rawLot / step) * step;
+
+   // 5. Apply Hard Limits (0.1 to 10.0)
+   if(rawLot < MinLotSize) rawLot = MinLotSize;
+   if(rawLot > MaxLotSize) rawLot = MaxLotSize;
+
+   return rawLot;
 }
 
 // Safety Checks
@@ -733,12 +773,29 @@ bool CheckEquityStop() {
 bool CheckDailyLossStop() {
    double profit = 0;
    datetime start = (datetime)(TimeCurrent() - (TimeCurrent() % 86400));
+
+   // Calculate Realized Daily P/L (including Swap and Commission)
    if(HistorySelect(start, TimeCurrent())) {
       for(int i=0; i<HistoryDealsTotal(); i++) {
          ulong ticket = HistoryDealGetTicket(i);
          profit += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+         profit += HistoryDealGetDouble(ticket, DEAL_SWAP);
+         profit += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
       }
    }
-   return (profit <= -DailyLossLimit);
+
+   // --- DYNAMIC LOSS LIMIT LOGIC ---
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double currentLimit = 0.0;
+
+   // If Balance < 5000, Limit is 1000. Else 20% of Balance.
+   if(balance < BalanceThreshold) {
+      currentLimit = FixedLossBelowThreshold;
+   } else {
+      currentLimit = balance * (PctLossAboveThreshold / 100.0);
+   }
+
+   // Check if loss exceeds limit
+   return (profit <= -currentLimit);
 }
 //+------------------------------------------------------------------+
