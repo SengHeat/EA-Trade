@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|                          SmartScalpingBot_v3_Pending.mq5         |
+//|                          SmartScalpingBot_v3_22.mq5              |
 //|           Version B - Safe Trend Scalper + Pending Orders        |
 //+------------------------------------------------------------------+
-#property copyright "Smart Scalping Bot v3 - Safe Trend Scalper"
-#property version   "3.21" // Updated for Dynamic Daily Loss Logic
+#property copyright "Smart Scalping Bot v3.22 - Dynamic BE"
+#property version   "3.22"
 #property strict
 
 //==================== ENUMS =========================================//
@@ -16,79 +16,77 @@ enum ENUM_EXECUTION_MODE {
 
 //==================== INPUT PARAMETERS ==============================//
 input group "=== Trading Settings ===";
-input ENUM_EXECUTION_MODE ExecutionMode = MODE_INSTANT; // Execution Strategy
-input int      MaxPositions = 3;              // Maximum positions per signal
-input int      MaxTotalPositions = 20;        // Maximum total (Positions + Pending)
-input bool     AllowMultipleSignals = true;   // Allow new signals with open positions
+input ENUM_EXECUTION_MODE ExecutionMode = MODE_INSTANT;
+input int      MaxPositions = 3;
+input int      MaxTotalPositions = 20;
+input bool     AllowMultipleSignals = true;
 
 input group "=== Pending Order Settings ===";
-input double   PendingDistanceATR = 3.0;      // Distance in ATR for Pending Orders
-input int      PendingExpirationMin = 60;     // Pending Order Expiration (Minutes)
-input bool     DeletePendingOnOpposite = true;// Delete Pending Orders on opposite signal
+input double   PendingDistanceATR = 3.0;
+input int      PendingExpirationMin = 60;
+input bool     DeletePendingOnOpposite = true;
 
-// --- NEW DYNAMIC LOT SETTINGS (UPDATED) ---
 input group "=== Money Management ===";
-input bool     UseDynamicLots = true;         // Enable Dynamic Lot Sizing
-input double   RiskPercent = 2.0;             // Base Risk % of Balance per setup
-input double   MinLotSize = 0.1;              // Minimum Lot Size (Hard Limit)
-input double   MaxLotSize = 10.0;             // Maximum Lot Size (Hard Limit)
-// Fallback if Dynamic Lots = false
+input bool     UseDynamicLots = true;
+input double   RiskPercent = 2.0;
+input double   MinLotSize = 0.1;
+input double   MaxLotSize = 10.0;
 input double   FixedBaseLot = 0.1;
 
 input group "=== Indicator Settings ===";
-input int      EMA_Fast = 5;                  // Fast EMA Period (M1)
-input int      EMA_Slow = 13;                 // Slow EMA Period (M1)
-input int      RSI_Period = 9;                // RSI Period (M1)
-input int      BB_Period = 15;                // Bollinger Bands Period (M1)
-input double   BB_Deviation = 1.5;            // BB Standard Deviation (M1)
-input int      MACD_Fast = 12;                // MACD Fast EMA
-input int      MACD_Slow = 26;                // MACD Slow EMA
-input int      MACD_Signal = 9;               // MACD Signal Period
+input int      EMA_Fast = 5;
+input int      EMA_Slow = 13;
+input int      RSI_Period = 9;
+input int      BB_Period = 15;
+input double   BB_Deviation = 1.5;
+input int      MACD_Fast = 12;
+input int      MACD_Slow = 26;
+input int      MACD_Signal = 9;
 
 input group "=== Signal Thresholds ===";
-input double   RSI_Oversold = 40;             // RSI Oversold Level
-input double   RSI_Overbought = 60;           // RSI Overbought Level
-input int      MinSignalScore = 5;            // Minimum score to trade
+input double   RSI_Oversold = 40;
+input double   RSI_Overbought = 60;
+input int      MinSignalScore = 4;            // Reduced from 5 to increase frequency
 
 input group "=== Risk Management ===";
-input int      MagicNumber = 234000;          // Magic Number
-input int      Slippage = 20;                 // Slippage in points
-input double   BreakevenOffset = 0.0001;      // Breakeven offset (fractional)
-input bool     UseBreakeven = true;           // Enable Breakeven
-input bool     UseTrailing = true;            // Enable Trailing Stop
+input int      MagicNumber = 234000;
+input int      Slippage = 20;
+input double   BreakevenOffset = 0.0001;      // Distance profit to lock in (approx 1 pip)
+input bool     UseBreakeven = true;
+input double   BE_Trigger_PctTP = 30.0;       // NEW: Move to BE at 30% of TP distance
+input bool     UseTrailing = true;
 
 input group "=== Trading Hours (Cambodia UTC+7) ===";
-input bool     UseAsianSession = true;        // Trade Asian Session (00:00-08:00)
-input bool     UseLondonSession = true;       // Trade London Session (08:00-16:00)
-input bool     UseNYSession = true;           // Trade NY Session (16:00-24:00)
+input bool     UseAsianSession = true;
+input bool     UseLondonSession = true;
+input bool     UseNYSession = true;
 
 input group "=== Advanced Settings ===";
-input int      MinBarsBetweenSignals = 3;     // Minimum bars between signals
-input bool     ShowDebugInfo = true;          // Show debug information
-input bool     SendNotifications = false;     // Send push notifications
+input int      MinBarsBetweenSignals = 3;
+input bool     ShowDebugInfo = true;
+input bool     SendNotifications = false;
 
-//==================== SAFETY / ATR / HTF ============================//
 input group "=== Risk / Safety Limits ===";
-input bool     EnableDailyLossStop = true;    // Enable daily loss stop
-// New Logic Inputs
-input double   BalanceThreshold = 5000.0;     // Balance logic threshold
-input double   FixedLossBelowThreshold = 1000.0; // Fixed Limit if Balance < Threshold
-input double   PctLossAboveThreshold = 20.0;  // Percent Limit if Balance >= Threshold
+input bool     EnableDailyLossStop = true;
+input double   BalanceThreshold = 5000.0;
+input double   FixedLossBelowThreshold = 1000.0;
+input double   PctLossAboveThreshold = 20.0;
 
-input double   MaxEquityDrawdown = 0.10;      // Stop trading if equity drawdown > 10%
-input int      MaxConsecutiveLosses = 100;    // Stop trading after N consecutive losing trades
-input bool     EnableEquityStop = true;       // Enable equity stop
+input double   MaxEquityDrawdown = 0.10;
+input int      MaxConsecutiveLosses = 100;
+input bool     EnableEquityStop = true;
 
 input group "=== Volatility & TF Filters ===";
-input int      ATR_Period = 14;               // ATR period for stop sizing
-input double   ATR_SL_Mult = 2.5;             // SL = ATR * this multiplier
-input double   ATR_TP_Mult = 3.5;             // TP = ATR * this multiplier
-input ENUM_TIMEFRAMES TrendTF1 = PERIOD_M15; // Trend TF1
-input ENUM_TIMEFRAMES TrendTF2 = PERIOD_H1;  // Trend TF2
-input int      TrendEMA1 = 50;                // EMA for TrendTF1
-input int      TrendEMA2 = 200;               // EMA for TrendTF2
+input int      ATR_Period = 14;
+input double   ATR_SL_Mult = 2.5;
+input double   ATR_TP_Mult = 3.5;
+input ENUM_TIMEFRAMES TrendTF1 = PERIOD_M15;
+input ENUM_TIMEFRAMES TrendTF2 = PERIOD_H1;
+input int      TrendEMA1 = 50;
+input int      TrendEMA2 = 200;
 
-input bool     RequireHigherTFTrend = true;   // Require higher TF trend agreement to trade
+// CHANGED: Set to false by default to increase trade frequency
+input bool     RequireHigherTFTrend = false;
 
 //==================== GLOBALS ======================================//
 int emaFastHandle = INVALID_HANDLE, emaSlowHandle = INVALID_HANDLE;
@@ -99,7 +97,6 @@ datetime lastSignalTime = 0;
 string lastSignal = "NONE";
 int lastSignalScore = 0;
 
-// Position tracking structure
 struct PositionInfo {
    ulong ticket;
    string side;
@@ -113,7 +110,6 @@ struct PositionInfo {
    bool trailingActive;
    double highest;
    double lowest;
-   double beThreshold;
    double trailingStart;
    double trailingStep;
    datetime openTime;
@@ -121,16 +117,11 @@ struct PositionInfo {
 
 PositionInfo positions[];
 
-// Strategy settings struct
 struct StrategySettings {
-   double tpLevels[3];
-   double sl;
-   double beTrigger;
    double trailingStart;
    double trailingStep;
 };
 
-// Stats
 struct Stats {
    int totalSignals;
    int totalTrades;
@@ -152,10 +143,8 @@ void ArrayRemove(T &arr[], int index, int count = 1) {
 
 //==================== ON INIT ======================================//
 int OnInit() {
-   // Validate inputs
    if(MaxPositions < 1 || MaxPositions > 10) return(INIT_PARAMETERS_INCORRECT);
 
-   // Create indicator handles (M1 base)
    emaFastHandle = iMA(_Symbol, PERIOD_M1, EMA_Fast, 0, MODE_EMA, PRICE_CLOSE);
    emaSlowHandle = iMA(_Symbol, PERIOD_M1, EMA_Slow, 0, MODE_EMA, PRICE_CLOSE);
    rsiHandle = iRSI(_Symbol, PERIOD_M1, RSI_Period, PRICE_CLOSE);
@@ -168,7 +157,6 @@ int OnInit() {
       return(INIT_FAILED);
    }
 
-   // Initialize arrays
    ArrayResize(emaFast, 3); ArrayResize(emaSlow, 3);
    ArrayResize(rsi, 3); ArrayResize(bbUpper, 3); ArrayResize(bbLower, 3); ArrayResize(bbMid, 3);
    ArrayResize(macdMain, 3); ArrayResize(macdSignal, 3);
@@ -177,28 +165,16 @@ int OnInit() {
    ArraySetAsSeries(rsi, true); ArraySetAsSeries(bbUpper, true); ArraySetAsSeries(bbLower, true);
    ArraySetAsSeries(bbMid, true); ArraySetAsSeries(macdMain, true); ArraySetAsSeries(macdSignal, true);
 
-   // Initialize stats
    stats.totalSignals = 0; stats.totalTrades = 0; stats.winningTrades = 0; stats.losingTrades = 0; stats.totalProfit = 0; stats.consecutiveLosses = 0;
 
-   // Sync existing positions
    SyncPositions();
-
-   Print("========================================");
-   Print("Smart Scalping Bot v3.21 - Dynamic Daily Limit");
-   Print("Mode: ", EnumToString(ExecutionMode));
-   Print("Lot Limits: ", MinLotSize, " - ", MaxLotSize);
-   Print("========================================");
-
    return(INIT_SUCCEEDED);
 }
 
 //==================== ON DEINIT ====================================//
 void OnDeinit(const int reason) {
-   IndicatorRelease(emaFastHandle);
-   IndicatorRelease(emaSlowHandle);
-   IndicatorRelease(rsiHandle);
-   IndicatorRelease(bbHandle);
-   IndicatorRelease(macdHandle);
+   IndicatorRelease(emaFastHandle); IndicatorRelease(emaSlowHandle);
+   IndicatorRelease(rsiHandle); IndicatorRelease(bbHandle); IndicatorRelease(macdHandle);
 }
 
 //==================== ON TICK ======================================//
@@ -217,13 +193,10 @@ void OnTick() {
 
    if(!IsTradingSession()) { UpdateDisplay(); return; }
 
-   // Risk Checks
    if(EnableEquityStop && CheckEquityStop()) { ManagePositions(); return; }
    if(EnableDailyLossStop && CheckDailyLossStop()) { ManagePositions(); return; }
 
-   // Count Open Positions AND Pending Orders
    int totalActive = CountTotalExposure();
-
    bool canTrade = false;
    if(totalActive == 0) canTrade = true;
    else if(AllowMultipleSignals && totalActive < MaxTotalPositions) {
@@ -237,7 +210,6 @@ void OnTick() {
       AnalyzeSignal(signal, strength, score);
 
       if(signal != "HOLD" && score >= MinSignalScore) {
-         // Check if we need to clean up opposite pending orders
          if(DeletePendingOnOpposite) DeleteOppositePendingOrders(signal);
 
          if(totalActive + 1 <= MaxTotalPositions) {
@@ -270,7 +242,6 @@ bool UpdateIndicators() {
 
 //==================== SYNC POSITIONS ================================//
 void SyncPositions() {
-   // remove closed
    for(int i = ArraySize(positions)-1; i >= 0; i--) {
       if(!PositionSelectByTicket(positions[i].ticket)) {
          double profit = 0;
@@ -288,7 +259,6 @@ void SyncPositions() {
       }
    }
 
-   // Add new positions (including triggered pending orders)
    for(int i = PositionsTotal()-1; i >= 0; i--) {
       ulong ticket = PositionGetTicket(i);
       if(ticket > 0 && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == MagicNumber) {
@@ -311,13 +281,12 @@ void SyncPositions() {
             positions[size].sl = PositionGetDouble(POSITION_SL);
             positions[size].tp = PositionGetDouble(POSITION_TP);
             positions[size].level = 1;
-            positions[size].strength = "UNKNOWN"; // Can't recover strength from history
+            positions[size].strength = "UNKNOWN";
             positions[size].beMovedTo = false;
             positions[size].trailingActive = false;
             positions[size].highest = positions[size].entryPrice;
             positions[size].lowest = positions[size].entryPrice;
-            positions[size].beThreshold = 0.0003;
-            positions[size].trailingStart = 0.0005;
+            positions[size].trailingStart = 0.0005; // Default fallback
             positions[size].trailingStep = 0.0002;
             positions[size].openTime = (datetime)PositionGetInteger(POSITION_TIME);
          }
@@ -327,7 +296,7 @@ void SyncPositions() {
 
 //==================== SESSION CHECK ================================//
 bool IsTradingSession() {
-   MqlDateTime dt; TimeToStruct(TimeCurrent() + 7*3600, dt); // UTC+7
+   MqlDateTime dt; TimeToStruct(TimeCurrent() + 7*3600, dt);
    int hour = dt.hour;
    if(UseAsianSession && hour >= 0 && hour < 8) return true;
    if(UseLondonSession && hour >= 8 && hour < 16) return true;
@@ -387,14 +356,14 @@ string GetSignalStrength(int score) {
 
 StrategySettings GetStrategySettings(string strength) {
    StrategySettings strat;
-   // Simple mapping for brevity
-   if(strength == "WEAK") { strat.beTrigger=0.0002; strat.trailingStart=0.0004; strat.trailingStep=0.0001; }
-   else if(strength == "MEDIUM") { strat.beTrigger=0.0003; strat.trailingStart=0.0005; strat.trailingStep=0.0002; }
-   else { strat.beTrigger=0.0004; strat.trailingStart=0.0006; strat.trailingStep=0.0003; }
+   // BE Trigger now handled by % TP logic, so we only set Trailing here
+   if(strength == "WEAK") { strat.trailingStart=0.0004; strat.trailingStep=0.0001; }
+   else if(strength == "MEDIUM") { strat.trailingStart=0.0005; strat.trailingStep=0.0002; }
+   else { strat.trailingStart=0.0006; strat.trailingStep=0.0003; }
    return strat;
 }
 
-//==================== OPEN POSITIONS (MODIFIED) ====================//
+//==================== OPEN POSITIONS ===============================//
 void OpenSmartPositions(string signal, string strength, int score) {
    StrategySettings strat = GetStrategySettings(strength);
    double atrM1 = GetATR(PERIOD_M1, ATR_Period);
@@ -403,17 +372,12 @@ void OpenSmartPositions(string signal, string strength, int score) {
    double slDist = atrM1 * ATR_SL_Mult;
    double tpDist = atrM1 * ATR_TP_Mult;
 
-   // Determine Lot Size (Passed Score and Strength)
    double lotToTrade = UseDynamicLots ? GetDynamicLot(slDist, RiskPercent, score) : FixedBaseLot;
-
-   // Hard Cap Check just in case
    if(lotToTrade > MaxLotSize) lotToTrade = MaxLotSize;
    if(lotToTrade < MinLotSize) lotToTrade = MinLotSize;
 
-   // Execution Loop
    int positionsToOpen = (ExecutionMode == MODE_HYBRID_LIMIT) ? 1 : MaxPositions;
 
-   // 1. EXECUTE MARKET ORDERS (If mode is Instant or Hybrid)
    if(ExecutionMode == MODE_INSTANT || ExecutionMode == MODE_HYBRID_LIMIT) {
       for(int i=0; i<positionsToOpen; i++) {
          double price = (signal=="BUY")?SymbolInfoDouble(_Symbol,SYMBOL_ASK):SymbolInfoDouble(_Symbol,SYMBOL_BID);
@@ -432,29 +396,23 @@ void OpenSmartPositions(string signal, string strength, int score) {
       }
    }
 
-   // 2. EXECUTE PENDING ORDERS
    if(ExecutionMode != MODE_INSTANT) {
-      // Calculate Pending Entry Price
       double pendingEntry = 0;
       double pendingOffset = atrM1 * PendingDistanceATR;
       ENUM_PENDING_TYPE type;
 
-      // Determine Type and Price
       if(ExecutionMode == MODE_PENDING_LIMIT || ExecutionMode == MODE_HYBRID_LIMIT) {
-         // Limit Orders (Pullbacks)
          if(signal == "BUY") { pendingEntry = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - pendingOffset; type = PENDING_LIMIT; }
          else { pendingEntry = SymbolInfoDouble(_Symbol, SYMBOL_BID) + pendingOffset; type = PENDING_LIMIT; }
       }
-      else { // MODE_PENDING_STOP (Breakouts)
+      else {
          if(signal == "BUY") { pendingEntry = SymbolInfoDouble(_Symbol, SYMBOL_ASK) + pendingOffset; type = PENDING_STOP; }
          else { pendingEntry = SymbolInfoDouble(_Symbol, SYMBOL_BID) - pendingOffset; type = PENDING_STOP; }
       }
 
-      // If Hybrid, we only place 1 pending order as a "layer". Otherwise we place MaxPositions
       int pendingCount = (ExecutionMode == MODE_HYBRID_LIMIT) ? 1 : MaxPositions;
 
       for(int i=0; i<pendingCount; i++) {
-         // Recalculate SL/TP relative to Pending Entry
          double sl = (signal=="BUY") ? pendingEntry - slDist : pendingEntry + slDist;
          double tp = (signal=="BUY") ? pendingEntry + tpDist : pendingEntry - tpDist;
 
@@ -467,7 +425,6 @@ void OpenSmartPositions(string signal, string strength, int score) {
    }
 }
 
-//==================== HELPER: ADD TO STRUCT ========================//
 void AddToPositionStruct(ulong ticket, string side, double price, double lot, double sl, double tp, string strength, int level, StrategySettings &strat) {
    int size = ArraySize(positions);
    ArrayResize(positions, size + 1);
@@ -482,7 +439,6 @@ void AddToPositionStruct(ulong ticket, string side, double price, double lot, do
    positions[size].beMovedTo = false;
    positions[size].highest = price;
    positions[size].lowest = price;
-   positions[size].beThreshold = strat.beTrigger;
    positions[size].trailingStart = strat.trailingStart;
    positions[size].trailingStep = strat.trailingStep;
    positions[size].openTime = TimeCurrent();
@@ -520,19 +476,15 @@ ulong PlacePendingOrder(ENUM_PENDING_TYPE pType, double lot, double price, doubl
    request.magic  = MagicNumber;
    request.comment = comment;
 
-   // Set Type
-   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID); // rough check
+   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    if(pType == PENDING_LIMIT) {
-       // Buy Limit must be below price, Sell Limit must be above
        if(price < currentPrice) request.type = ORDER_TYPE_BUY_LIMIT;
        else request.type = ORDER_TYPE_SELL_LIMIT;
    } else {
-       // Buy Stop must be above, Sell Stop must be below
        if(price > currentPrice) request.type = ORDER_TYPE_BUY_STOP;
        else request.type = ORDER_TYPE_SELL_STOP;
    }
 
-   // Expiration
    if(PendingExpirationMin > 0) {
       request.type_time = ORDER_TIME_SPECIFIED;
       request.expiration = TimeCurrent() + (PendingExpirationMin * 60);
@@ -555,11 +507,9 @@ void DeleteOppositePendingOrders(string newSignal) {
          long type = OrderGetInteger(ORDER_TYPE);
          bool shouldDelete = false;
 
-         // If New Signal is BUY, delete Sell Limits/Stops
          if(newSignal == "BUY") {
             if(type == ORDER_TYPE_SELL_LIMIT || type == ORDER_TYPE_SELL_STOP) shouldDelete = true;
          }
-         // If New Signal is SELL, delete Buy Limits/Stops
          else if(newSignal == "SELL") {
             if(type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_BUY_STOP) shouldDelete = true;
          }
@@ -596,7 +546,7 @@ bool ValidateStops(double entryPrice, double &sl, double &tp, string side) {
    return true;
 }
 
-//==================== MANAGE POSITIONS (BE & TRAIL) =================//
+//==================== MANAGE POSITIONS (UPDATED) ====================//
 void ManagePositions() {
    for(int i = ArraySize(positions)-1; i >= 0; i--) {
       if(!PositionSelectByTicket(positions[i].ticket)) continue;
@@ -608,15 +558,30 @@ void ManagePositions() {
       else { if(currentPrice < positions[i].lowest) positions[i].lowest = currentPrice; }
 
       double profitPct = 0;
-      if(positions[i].side == "BUY") profitPct = (currentPrice - positions[i].entryPrice) / positions[i].entryPrice;
-      else profitPct = (positions[i].entryPrice - currentPrice) / positions[i].entryPrice;
+      double currentProfitDist = 0;
+      double totalTPDist = MathAbs(positions[i].tp - positions[i].entryPrice);
 
-      // Breakeven
-      if(UseBreakeven && !positions[i].beMovedTo && profitPct >= positions[i].beThreshold) {
-         double newSL = (positions[i].side == "BUY") ? positions[i].entryPrice * (1 + BreakevenOffset) : positions[i].entryPrice * (1 - BreakevenOffset);
-         newSL = NormalizeDouble(newSL, _Digits);
-         if(ModifyPosition(positions[i].ticket, newSL, positions[i].tp)) {
-            positions[i].sl = newSL; positions[i].beMovedTo = true;
+      if(positions[i].side == "BUY") {
+         profitPct = (currentPrice - positions[i].entryPrice) / positions[i].entryPrice;
+         currentProfitDist = currentPrice - positions[i].entryPrice;
+      }
+      else {
+         profitPct = (positions[i].entryPrice - currentPrice) / positions[i].entryPrice;
+         currentProfitDist = positions[i].entryPrice - currentPrice;
+      }
+
+      // --- NEW BREAKEVEN LOGIC (30% of TP) ---
+      // We check if current profit distance > (Total TP Distance * Percentage)
+      if(UseBreakeven && !positions[i].beMovedTo && totalTPDist > 0) {
+         if(currentProfitDist >= (totalTPDist * (BE_Trigger_PctTP / 100.0))) {
+            double newSL = (positions[i].side == "BUY") ? positions[i].entryPrice + BreakevenOffset : positions[i].entryPrice - BreakevenOffset;
+            newSL = NormalizeDouble(newSL, _Digits);
+
+            if(ModifyPosition(positions[i].ticket, newSL, positions[i].tp)) {
+               positions[i].sl = newSL;
+               positions[i].beMovedTo = true;
+               Print("Locked BE for Ticket ", positions[i].ticket, " at 30% TP progress.");
+            }
          }
       }
 
@@ -652,11 +617,9 @@ bool ModifyPosition(ulong ticket, double sl, double tp) {
 //==================== COUNT ========================================//
 int CountTotalExposure() {
    int count = 0;
-   // Count Positions
    for(int i=PositionsTotal()-1;i>=0;i--) {
       if(PositionGetTicket(i)>0 && PositionGetString(POSITION_SYMBOL)==_Symbol && PositionGetInteger(POSITION_MAGIC)==MagicNumber) count++;
    }
-   // Count Pending Orders
    for(int i=OrdersTotal()-1;i>=0;i--) {
       if(OrderGetTicket(i)>0 && OrderGetString(ORDER_SYMBOL)==_Symbol && OrderGetInteger(ORDER_MAGIC)==MagicNumber) count++;
    }
@@ -673,13 +636,11 @@ void UpdateDisplay() {
       if(PositionSelectByTicket(positions[i].ticket)) currentProfit += PositionGetDouble(POSITION_PROFIT);
    }
 
-   // --- Calculate Current Daily Limit for Display ---
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double currentLimit = 0;
    if(balance < BalanceThreshold) currentLimit = FixedLossBelowThreshold;
    else currentLimit = balance * (PctLossAboveThreshold/100.0);
 
-   // --- Calculate Daily Loss ---
    double dailyProfit = 0;
    datetime start = (datetime)(TimeCurrent() - (TimeCurrent() % 86400));
    if(HistorySelect(start, TimeCurrent())) {
@@ -692,9 +653,9 @@ void UpdateDisplay() {
    }
 
    string info = StringFormat(
-      "SMART SCALPING BOT v3.21 (Dynamic Limits)\nMode: %s\nTime: %02d:%02d UTC+7\nPrice: %.5f\nPositions: %d / %d\nLast Signal: %s\nCurrent Open P/L: $%.2f\nTotal History P/L: $%.2f\n\nDaily P/L: $%.2f\nDaily Limit: -$%.2f",
+      "SMART SCALPING BOT v3.22 (Dynamic BE)\nMode: %s\nTime: %02d:%02d UTC+7\nPrice: %.5f\nPositions: %d / %d\nLast Signal: %s\nCurrent Open P/L: $%.2f\nTotal History P/L: $%.2f\n\nDaily P/L: $%.2f\nDaily Limit: -$%.2f\nBE Trigger: %.0f%% of TP",
       EnumToString(ExecutionMode), dt.hour, dt.min, price, openPos, MaxTotalPositions,
-      lastSignal, currentProfit, stats.totalProfit, dailyProfit, currentLimit
+      lastSignal, currentProfit, stats.totalProfit, dailyProfit, currentLimit, BE_Trigger_PctTP
    );
    Comment(info);
 }
@@ -725,45 +686,28 @@ int GetHigherTFTrend() {
    if(up > down) return 1; if(down > up) return -1; return 0;
 }
 
-// UPDATED DYNAMIC LOT FUNCTION
 double GetDynamicLot(double slDistancePoints, double riskPct, int score) {
    if(!UseDynamicLots) return FixedBaseLot;
-
-   // 1. Calculate base risk from BALANCE (not Equity, as requested)
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double riskMoney = (balance * (riskPct / 100.0)) / (double)MaxPositions;
-
-   // 2. Score Multiplier
    double mult = 1.0;
-   if(score >= 9) mult = 2.0;       // Very Strong Signal (Score 9+)
-   else if(score >= 7) mult = 1.5;  // Strong Signal (Score 7-8)
-   else mult = 1.0;                 // Medium Signal (Score 5-6)
-
+   if(score >= 9) mult = 2.0;
+   else if(score >= 7) mult = 1.5;
+   else mult = 1.0;
    riskMoney *= mult;
-
-   // 3. Calculate Lot based on Stop Loss distance
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-
    if(tickValue <= 0 || tickSize <= 0) return FixedBaseLot;
-
    double lossPerLot = (slDistancePoints / tickSize) * tickValue;
    if(lossPerLot <= 0) return FixedBaseLot;
-
    double rawLot = riskMoney / lossPerLot;
-
-   // 4. Broker Step Normalization
    double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    rawLot = MathFloor(rawLot / step) * step;
-
-   // 5. Apply Hard Limits (0.1 to 10.0)
    if(rawLot < MinLotSize) rawLot = MinLotSize;
    if(rawLot > MaxLotSize) rawLot = MaxLotSize;
-
    return rawLot;
 }
 
-// Safety Checks
 bool CheckEquityStop() {
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -773,8 +717,6 @@ bool CheckEquityStop() {
 bool CheckDailyLossStop() {
    double profit = 0;
    datetime start = (datetime)(TimeCurrent() - (TimeCurrent() % 86400));
-
-   // Calculate Realized Daily P/L (including Swap and Commission)
    if(HistorySelect(start, TimeCurrent())) {
       for(int i=0; i<HistoryDealsTotal(); i++) {
          ulong ticket = HistoryDealGetTicket(i);
@@ -783,19 +725,13 @@ bool CheckDailyLossStop() {
          profit += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
       }
    }
-
-   // --- DYNAMIC LOSS LIMIT LOGIC ---
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double currentLimit = 0.0;
-
-   // If Balance < 5000, Limit is 1000. Else 20% of Balance.
    if(balance < BalanceThreshold) {
       currentLimit = FixedLossBelowThreshold;
    } else {
       currentLimit = balance * (PctLossAboveThreshold / 100.0);
    }
-
-   // Check if loss exceeds limit
    return (profit <= -currentLimit);
 }
 //+------------------------------------------------------------------+

@@ -269,12 +269,12 @@ void OnTick() {
       ManagePositions();
       return;
    }
-   if(stats.consecutiveLosses >= MaxConsecutiveLosses && false) {
-      if(ShowDebugInfo) Print("Max consecutive losses reached - skipping trades");
+   if(stats.consecutiveLosses >= MaxConsecutiveLosses) {  // REMOVED: && false
+      if(ShowDebugInfo) Print("Max consecutive losses (", stats.consecutiveLosses, ") reached - skipping trades");
       UpdateDisplay();
       ManagePositions();
       return;
-   }
+  }
 
    // Count open positions
    int openPos = CountOpenPositions();
@@ -436,15 +436,20 @@ void AnalyzeSignal(string &signal, string &strength, int &score) {
    else if(macdDiff < 0) { sellScore += 1; if(ShowDebugInfo) Print("SELL: MACD Negative (+1)"); }
 
    // 6. Volume confirmation using 20-bar average
-   double volMA = 0;
-   for(int i=0;i<20;i++) volMA += (double)iVolume(_Symbol, PERIOD_M1, i);
-   volMA /= 20.0;
-   double volRatio = (volMA > 0) ? volume0/volMA : 0;
+double volMA = 0;
+int volBars = MathMin(20, iBars(_Symbol, PERIOD_M1));  // ADDED: Safety check
+for(int i=0; i<volBars; i++) volMA += (double)iVolume(_Symbol, PERIOD_M1, i);
+volMA /= (double)volBars;  // CHANGED: Divide by actual bars counted
+
+if(volMA <= 0) {  // ADDED: Validation
+   if(ShowDebugInfo) Print("Invalid volume data - skipping volume filter");
+} else {
+   double volRatio = volume0 / volMA;
    if(volRatio > 1.2) {
       if(buyScore > sellScore) { buyScore += 1; if(ShowDebugInfo) Print("BUY: High Volume (+1)"); }
       else if(sellScore > buyScore) { sellScore += 1; if(ShowDebugInfo) Print("SELL: High Volume (+1)"); }
    }
-
+}
    // ATR check
    double atr = GetATR(PERIOD_M1, ATR_Period);
    if(ShowDebugInfo) Print("ATR M1=", DoubleToString(atr, _Digits));
@@ -483,16 +488,24 @@ StrategySettings GetStrategySettings(string strength) {
    StrategySettings strat;
    if(strength == "WEAK") {
       strat.tpLevels[0]=0.0003; strat.tpLevels[1]=0.0005; strat.tpLevels[2]=0.0007;
-      strat.sl=0.0004; strat.beTrigger=0.0002; strat.trailingStart=0.0004; strat.trailingStep=0.0001;
+      strat.sl=0.0004; 
+      strat.beTrigger=0.0002;  // Move BE early for weak signals (more defensive)
+      strat.trailingStart=0.0004; strat.trailingStep=0.0001;
    } else if(strength == "MEDIUM") {
       strat.tpLevels[0]=0.0005; strat.tpLevels[1]=0.0008; strat.tpLevels[2]=0.0012;
-      strat.sl=0.0006; strat.beTrigger=0.0003; strat.trailingStart=0.0005; strat.trailingStep=0.0002;
+      strat.sl=0.0006; 
+      strat.beTrigger=0.0004;  // CHANGED: Delay BE slightly (was 0.0003)
+      strat.trailingStart=0.0005; strat.trailingStep=0.0002;
    } else if(strength == "STRONG") {
       strat.tpLevels[0]=0.0008; strat.tpLevels[1]=0.0012; strat.tpLevels[2]=0.0018;
-      strat.sl=0.0006; strat.beTrigger=0.0004; strat.trailingStart=0.0006; strat.trailingStep=0.0003;
+      strat.sl=0.0006; 
+      strat.beTrigger=0.0008;  // CHANGED: Delay BE more for strong signals (was 0.0004)
+      strat.trailingStart=0.0006; strat.trailingStep=0.0003;
    } else { // VERY_STRONG
       strat.tpLevels[0]=0.0010; strat.tpLevels[1]=0.0015; strat.tpLevels[2]=0.0025;
-      strat.sl=0.0007; strat.beTrigger=0.0005; strat.trailingStart=0.0008; strat.trailingStep=0.0004;
+      strat.sl=0.0007; 
+      strat.beTrigger=0.0012;  // CHANGED: Delay BE significantly for very strong signals (was 0.0005)
+      strat.trailingStart=0.0008; strat.trailingStep=0.0004;
    }
    return strat;
 }
