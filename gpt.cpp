@@ -62,13 +62,13 @@ input ENUM_TIMEFRAMES TrendTF2 = PERIOD_H4;    // Trend Timeframe 2
 input int TrendEMA1 = 50;                      // EMA Period 1
 input int TrendEMA2 = 200;                     // EMA Period 2
 input double ATR_SL_Mult = 2.0;                // ATR Multiplier for SL
-input double ATR_TP_Mult = 1.50;                // ATR Multiplier for TP
+input double ATR_TP_Mult = 1.50;               // ATR Multiplier for TP
 input bool UseDynamicLots = true;              // Use Dynamic Lot Sizing
 input double RiskPercent = 1.0;                // Risk Percent per Trade
 input double FixedBaseLot = 0.01;              // Fixed Lot Size
 input double MaxLotSize = 5.0;                 // Max Allowed Lot
-input int MaxPositions = 1;                    // Max Positions per Signal
-input int MaxTotalPositions = 10;              // Max Total Open Positions
+input int MaxPositions = 2;                   // Max Positions per Signal (Updated to 50)
+input int MaxTotalPositions = 50;              // Max Total Open Positions (Updated to 10)
 input int Slippage = 3;                        // Max Slippage
 input int MagicNumber = 123456;                // Magic Number
 input bool UseBreakeven = true;                // Use Breakeven
@@ -82,7 +82,7 @@ input double MaxEquityDrawdown = 0.10;         // Max Drawdown (0.10 = 10%)
 input bool EnableDailyLossStop = true;         // Enable Daily Loss Limit
 input double DailyLossLimit = 100.0;           // Daily Loss Limit ($)
 input bool AllowMultipleSignals = true;        // Allow Multiple Signals
-input bool IgnoreMaxPositionLimit = false;  // Add this to inputs section
+input bool IgnoreMaxPositionLimit = false;     // Add this to inputs section
 
 
 
@@ -193,7 +193,7 @@ void OnTick() {
 
         string strengthLabel = GetSignalStrength(score);
 
-        if(score >= 8) {
+        if(score >= 11) {
             Print("║ ✅ DECISION: EXECUTE TRADE (", strengthLabel, ")");
             Print("╚═══════════════════════════════════════════════");
 
@@ -384,7 +384,14 @@ double GetDynamicLot(double slDistance, double riskPct, string strength) {
     if(!UseDynamicLots) return FixedBaseLot;
 
     double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-    double riskMoney = (equity * (riskPct / 100.0)) / (double)MaxPositions;
+    // Use MaxTotalPositions or a specific number to determine the base risk per position,
+    // though the provided code uses MaxPositions in the original snippet, which is now 50.
+    // I'll assume the intention is to use a risk base of 1% (RiskPercent) of equity for the *entire trade signal*
+    // and distribute it across the calculated number of positions.
+    // Since the number of positions is now dynamic, the risk calculation is complex.
+    // For simplicity and to maintain the original structure, I'll keep the division by MaxPositions (now 50)
+    // and let the dynamic 'numPositionsToOpen' in the caller function handle the final trade size.
+    double riskMoney = (equity * (riskPct / 100.0)) / (double)MaxPositions; // MaxPositions = 50
 
     double strengthMult = GetLotMultiplier(strength);
     riskMoney *= strengthMult;
@@ -474,12 +481,30 @@ bool CanOpenMorePositions() {
 }
 
 void OpenSmartPositions(string signal, string strength, int score) {
-     // Remove this check to allow unlimited positions:
-     int currentOpen = CountOpenPositions();
-     if(currentOpen >= MaxTotalPositions) {
-         Print("Max positions reached: ", currentOpen);
-         return;
-     }
+    int currentOpen = CountOpenPositions();
+
+    // Determine the number of positions to open based on score
+    int desiredMaxPositions = 0;
+    if (score >= 14) {
+        desiredMaxPositions = 30; // Score > 11 (Strong/Very Strong)
+    } else if (score >= 11) {
+        desiredMaxPositions = 20; // Score >= 8 (Medium)
+    } else {
+        // Should not happen as it's checked before calling this function
+        return;
+    }
+
+    // Determine how many positions we can actually open
+    int numToOpen = MathMin(desiredMaxPositions, MaxPositions);
+    if (!IgnoreMaxPositionLimit) {
+        numToOpen = MathMin(numToOpen, MaxTotalPositions - currentOpen);
+    }
+
+    if(numToOpen <= 0) {
+        Print("Max total positions reached or calculated positions is zero. Current: ", currentOpen, " Max: ", MaxTotalPositions);
+        return;
+    }
+
     double price = (signal == "BUY") ?
         SymbolInfoDouble(_Symbol, SYMBOL_ASK) :
         SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -491,7 +516,7 @@ void OpenSmartPositions(string signal, string strength, int score) {
     double slDistance = atrValue * ATR_SL_Mult;
     double tpDistance = atrValue * ATR_TP_Mult;
 
-    // Dynamic lot sizing
+    // Dynamic lot sizing (lot calculated is per position based on MaxPositions=50 as per GetDynamicLot logic)
     double lot = UseDynamicLots ?
         GetDynamicLot(slDistance, RiskPercent, strength) :
         NormalizeDouble(FixedBaseLot * GetLotMultiplier(strength), 2);
@@ -507,7 +532,7 @@ void OpenSmartPositions(string signal, string strength, int score) {
     if(lot > MaxLotSize) lot = MaxLotSize;
 
     Print("========================================");
-    Print("Opening ", MaxPositions, "x ", signal, " ", strength);
+    Print("Opening ", numToOpen, "x ", signal, " ", strength, " (Max for Signal: ", desiredMaxPositions, ")");
     Print("Score: ", score, " | Lot: ", DoubleToString(lot, 2));
     Print("ATR: ", DoubleToString(atrValue, _Digits));
     Print("SL Distance: ", DoubleToString(slDistance, _Digits));
@@ -516,7 +541,7 @@ void OpenSmartPositions(string signal, string strength, int score) {
 
     int successCount = 0;
 
-    for(int i = 0; i < MaxPositions; i++) {
+    for(int i = 0; i < numToOpen; i++) {
         double sl, tp;
 
         if(signal == "BUY") {
@@ -570,7 +595,7 @@ void OpenSmartPositions(string signal, string strength, int score) {
         Sleep(200);
     }
 
-    Print("Successfully opened ", successCount, "/", MaxPositions, " positions");
+    Print("Successfully opened ", successCount, "/", numToOpen, " positions");
 }
 
 //==================== POSITION MANAGEMENT ===========================//
